@@ -1,3 +1,4 @@
+
 import re
 import os
 import torch
@@ -14,16 +15,16 @@ tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 
 def preprocess_text(text):
-    text = text.lower() 
-    text = re.sub(r'[^\w\s]', '', text)  
+    text = text.lower()  
+    text = re.sub(r'[^\w\s]', '', text) 
     return text  
 
 def preprocess_data(file_path: str):
     data = pd.read_csv(file_path)
     data = data.dropna()  
-  
+
     data[["H", "E", "R", "A"]] = data[["H", "E", "R", "A"]].astype(int)
-    data["review"] = data["review"].apply(preprocess_text)  
+    data["review"] = data["review"].apply(preprocess_text) 
     return data
 
 
@@ -33,7 +34,7 @@ class MyDataset(Dataset):
         self.label_column = label_column
 
     def __getitem__(self, index):
-  
+
         review = self.data.loc[index, "review"]
         label = self.data.loc[index, self.label_column]
         label = torch.tensor(label, dtype=torch.long) 
@@ -50,9 +51,8 @@ def collate_func(batch):
         labels.append(item[1])
     inputs = tokenizer(texts, max_length=512, padding="max_length",
                        truncation=True, return_tensors="pt")
-    inputs["labels"] = torch.tensor(labels, dtype=torch.long)  
+    inputs["labels"] = torch.tensor(labels, dtype=torch.long) 
     return inputs
-
 
 def load_and_split_data(file_path: str, label_column: str):
     data = preprocess_data(file_path)
@@ -75,17 +75,17 @@ def evaluate(model, dataloader):
     correct_pred, total_pred = 0, 0
     with torch.no_grad():
         for batch in dataloader:
-          
+ 
             if torch.cuda.is_available():
                 batch = {k: v.cuda() for k, v in batch.items()}
-          
+     
             outputs = model(**batch)
             logits = outputs.logits  # 形状：(batch_size, num_labels)
         
             preds = torch.argmax(logits, dim=-1)  # 形状：(batch_size,)
-    
-            labels = batch["labels"]  # 形状：(batch_size,)
 
+            labels = batch["labels"]  # 形状：(batch_size,)
+ 
             batch_correct = (preds == labels).sum().item()
             batch_total = labels.size(0)
             correct_pred += batch_correct
@@ -110,33 +110,33 @@ def train(model, trainloader, validloader, label, epoch=10):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-     
+
         acc = evaluate(model, validloader)
         print(f"Epoch {ep + 1}/{epoch}, Accuracy: {acc:.4f}")
 
-    model_save_path = f"D:/BERTE/saved_model_{label}"
+    model_save_path = 
     model.save_pretrained(model_save_path)
     print(f"Model for label {label} saved to {model_save_path}")
 
-
+# 主程序
 if __name__ == "__main__":
 
     os.makedirs("D:/BERTE", exist_ok=True)
 
     for label in ["H", "E", "R", "A"]:
         print(f"Training model for label: {label}")
-      
+
         trainloader, validloader, testloader = load_and_split_data("en_IMDb_600_data.csv", label_column=label)
-  
+
         model = AutoModelForSequenceClassification.from_pretrained(
             model_path,
             num_labels=2,  
-            problem_type="single_label_classification" 
+            problem_type="single_label_classification"  
         )
         if torch.cuda.is_available():
             model = model.cuda()
-  
+   
         train(model, trainloader, validloader, label)
-
+  
         acc = evaluate(model, testloader)
         print(f"Final accuracy for label {label}: {acc:.4f}")
