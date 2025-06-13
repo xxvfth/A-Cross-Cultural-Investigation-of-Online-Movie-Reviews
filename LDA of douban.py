@@ -1,7 +1,10 @@
 import os
 import codecs
+import string
 import pandas as pd
-import sentencepiece as spm
+import jieba
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import wordnet
 from datetime import datetime
 from gensim import corpora, models
 import logging
@@ -11,16 +14,12 @@ import pyLDAvis
 
 
 NUM_TOPICS = k
-PASSES = 3
-ITERATIONS = 6000
-WORKERS = 8
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 class NlpPreProcess(object):
     """Preprocess the html of gdelt-data"""
-    def __init__(self, stopfile, spm_model):
-        self.sp = spm.SentencePieceProcessor(model_file=spm_model)
+    def __init__(self, stopfile):
         with codecs.open(stopfile, 'r', 'utf-8') as f:
             self.stoplist = f.read().splitlines()
         print('The number of stopwords is %s' % len(self.stoplist))
@@ -34,19 +33,13 @@ class NlpPreProcess(object):
         for index, row in df.iterrows():
             doc = row.iloc[0]
             if isinstance(doc, str):  
-                
-                for stopword in self.stoplist:
-                    doc = doc.replace(stopword, '')
-
-                words = self.sp.encode_as_pieces(doc)  
-
-                
-                clean_doc = [word for word in words if len(word) >= 2 and word not in self.stoplist]
-                
-                if clean_doc: 
-                    doclist.append(clean_doc)
-                    num += 1
-
+                sentences = jieba.cut(doc)
+                for sentence in sentences:
+                    words = list(jieba.cut(sentence))
+                    clean_doc = [word for word in words if len(word) >= 2 and word not in self.stoplist]
+                    if clean_doc:
+                        doclist.append(clean_doc)
+                        num += 1
         print('Time cost is : %s' % (datetime.now() - stime))
         print('The number of valid docs is : %s' % num)
         return doclist
@@ -61,11 +54,8 @@ class GLDA(object):
         else:
             self.stopword_list = None
 
-    def lda_train(self, num_topics, doclist, result_folder, dictionary_path=None, corpus_path=None, iterations=6000, passes=3, workers=8):       
+    def lda_train(self, num_topics, doclist, result_folder, dictionary_path=None, corpus_path=None, iterations=5000, passes=1, workers=3):       
         time1 = datetime.now()
-        if not doclist:
-            raise ValueError("The document list is empty after preprocessing. Please check your data and preprocessing steps.")
-        
         if dictionary_path:
             dictionary = corpora.Dictionary.load(dictionary_path)
         else:
@@ -101,11 +91,6 @@ def perplexity(ldamodel, testset, dictionary, size_dictionary, num_topics):
     """Calculate the perplexity of an LDA model"""
     print('Info of this LDA model:')
     print('Number of testset: %s; Size of dictionary: %s; Number of topics: %s' % (len(testset), size_dictionary, num_topics))
-    
-    if not testset:
-        print("Testset is empty. Exiting perplexity calculation.")
-        return float('inf')
-    
     prep = 0.0
     prob_doc_sum = 0.0
     topic_word_list = []  # Store the probability of topic-word
@@ -140,30 +125,28 @@ def perplexity(ldamodel, testset, dictionary, size_dictionary, num_topics):
         prob_doc_sum += prob_doc
         testset_word_num += doc_word_num
     
-    if testset_word_num == 0:
-        print("No words in testset. Exiting perplexity calculation.")
-        return float('inf')
-    
     prep = math.exp(-prob_doc_sum / testset_word_num)  # Perplexity = exp(-sum(p(d))/sum(Nd))
     print("The perplexity of this LDA model is: %s" % prep)
     return prep
 
 if __name__ == '__main__':
+    print("Start program")
+
     stopword_filepath = 
     excel_path = 
     result_folder = 
-    spm_model = '
     os.makedirs(result_folder, exist_ok=True)
     
     # Preprocess Excel data
-    nlp_preprocess = NlpPreProcess(stopword_filepath, spm_model)
+    print("Start preprocessing")
+    nlp_preprocess = NlpPreProcess(stopword_filepath)
     doclist = nlp_preprocess.preprocess_excel(excel_path)
     
-    
-    if not doclist:
-        raise ValueError("The document list is empty after preprocessing. Please check your data and preprocessing steps.")
-    
     # Train LDA model
+    print("Start LDA training")
+    passes = 10
+    iterations = 1500
+    workers = 8
     lda = GLDA(stopword_filepath)
     lda_model, corpusTfidf, dictionary = lda.lda_train(
         NUM_TOPICS,
@@ -171,38 +154,37 @@ if __name__ == '__main__':
         result_folder,
         dictionary_path=None,
         corpus_path=None,
-        iterations=ITERATIONS,
-        passes=PASSES,
-        workers=WORKERS
+        iterations=iterations,
+        passes=passes,
+        workers=workers
     )
 
     # Calculate perplexity
+    print("Start perplexity calculation")
     testset = [corpusTfidf[i * 300] for i in range(len(corpusTfidf) // 300)]
-    if not testset:
-        print("Testset is empty. Please check your corpus and sampling method.")
-    else:
-        prep = perplexity(lda_model, testset, dictionary, len(dictionary.keys()), NUM_TOPICS)
+    prep = perplexity(lda_model, testset, dictionary, len(dictionary.keys()), NUM_TOPICS)
 
     # Visualize topics
-    vis_data = gensimvis.prepare(lda_model, corpusTfidf, dictionary, mds='mmds', sort_topics=False)
-    html_path = os.path.join(result_folder, 'lda_vis.html')
-    pyLDAvis.save_html(vis_data, html_path)
+    print("Start visualization")
+    vis_data = gensimvis.prepare(lda_model, corpusTfidf, dictionary)
+    pyLDAvis.save_html(vis_data, os.path.join(result_folder, 'lda_vis.html'))
+    #pyLDAvis.show(vis_data)
 
-    
-    with open(html_path, 'r', encoding='utf-8') as f:
-        html_content = f.read()
+  # Print topic details and frequencies
+    print("Start printing topic details and frequencies")
 
-    html_content = html_content.replace(
-        'https://cdn.jsdelivr.net/gh/bmabey/pyLDAvis@3.4.0/pyLDAvis/js/ldavis.v1.0.0.js',
-        'D:\\pythonk\\lda\\pyLDAvis\\ldavis.v1.0.0.js'
-    )
-    html_content = html_content.replace(
-        'https://cdn.jsdelivr.net/gh/bmabey/pyLDAvis@3.4.0/pyLDAvis/js/ldavis.v1.0.0.css',
-        'D:\\pythonk\\lda\\pyLDAvis\\ldavis.v1.0.0.css'
-    )
 
-    with open(html_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
+    topic_frequencies = [0] * NUM_TOPICS
+    for doc in corpusTfidf:
+        for topic_id, topic_prob in lda_model.get_document_topics(doc):
+            topic_frequencies[topic_id] += topic_prob
 
-    
-    pyLDAvis.display(vis_data)
+    total_docs = len(corpusTfidf)
+    for topic_id in range(NUM_TOPICS):
+        topic_frequency_percent = (topic_frequencies[topic_id] / total_docs) * 100
+        print(f"\nTopic {topic_id} (Frequency: {topic_frequency_percent:.2f}%):")
+        topic = lda_model.show_topic(topic_id, topn=20)
+        for word, prob in topic:
+            print(f"  {word}: {prob}")
+
+    print("End of program")
